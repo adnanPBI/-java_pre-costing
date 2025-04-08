@@ -8,6 +8,8 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
 	<script src="https://cdn.jsdelivr.net/npm/md5-js@0.0.3/md5.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+	
 	
     <style>
         body {
@@ -101,11 +103,32 @@
                 </div>
             </div>
         </div>
-
+        <!-- Load Modal -->
+<div class="modal fade" id="loadModal" tabindex="-1" aria-labelledby="loadModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="loadModalLabel">Load Pre-Costing Data</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="loadJsonFile" class="form-label">Load from JSON File</label>
+                    <input type="file" class="form-control" id="loadJsonFile" accept=".json">
+                </div>
+                <h6>Saved in Session</h6>
+                <ul class="list-group" id="loadList"></ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
         <!-- Basic Information -->
         <div class="section-header">Basic Information</div>
         <div class="row mb-3">
-            <div class="col-md-4"><label>Pre Costing No:</label><input type="text" class="form-control" id="preCostingNo" value="M=2"></div>
+            <div class="col-md-4"><label>Pre Costing No:</label><input type="text" class="form-control" id="preCostingNo" maxlength="8" pattern="\d{1,8}" placeholder="Enter Pre-Costing No" value="M=2"></div>
             <div class="col-md-4"><label>Buyer:</label><input type="text" class="form-control" id="buyer" value="madam"></div>
             <div class="col-md-4"><label>Construction:</label><input type="text" class="form-control" id="construction" value="40x40/120x80"></div>
         </div>
@@ -386,23 +409,77 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script>
+// let’s use a global variable called currentPreCostingData to store the fetched Supabase data	
+// Initialize currentPreCostingData with default values
+let currentPreCostingData = {
+    preCostingData: null,
+    warpDetails: [],
+    weftDetails: []
+};	
 // Import Supabase client
 const { createClient } = window.supabase;
 const supabaseUrl = 'https://qebqccpbnmgvtbzawluk.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFlYnFjY3Bibm1ndnRiemF3bHVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIxMDIzMTcsImV4cCI6MjA1NzY3ODMxN30.tdoAzpyJe7X76dQsLaDYWoy2VrpxXBc7RXmyqxROaQI';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-
-// Hardcoded password hash for "password123" (MD5 hash)
+// Hardcoded password hash for "pass123" (MD5 hash)
 const hashedPassword = '32250170a0dca92d53ec9624f336ca24';
 
 // Login functionality
 let isLoggedIn = false;
 
+// Function to generate the next pre-costing number
+async function generateNextPreCostingNo() {
+    try {
+        const { data, error } = await supabase
+            .from('pre_costing_data')
+            .select('pre_costing_no')
+            .order('pre_costing_no', { ascending: false })
+            .limit(1);
+
+        if (error) throw error;
+
+        let nextNumber = 1;
+        if (data && data.length > 0) {
+            const lastPreCostingNo = data[0].pre_costing_no; // e.g., "Pre/costing/No:01" or "Pre/costing/No:100"
+            const match = lastPreCostingNo.match(/Pre\/costing\/No:(\d+)/);
+            if (match) {
+                const lastNumber = parseInt(match[1], 10);
+                nextNumber = lastNumber + 1;
+            }
+        }
+
+        if (nextNumber > 10000000) {
+            throw new Error('Maximum pre-costing number (10,000,000) reached.');
+        }
+
+        // Format the number: "Pre/costing/No:XX" (01-09 for 1-9, 10-10000000 as is)
+        const formattedNumber = nextNumber < 10 ? `0${nextNumber}` : nextNumber;
+        return `Pre/costing/No:${formattedNumber}`;
+    } catch (error) {
+        console.error('Error generating pre-costing number:', error);
+        return 'Pre/costing/No:01'; // Fallback to 01 if there's an error
+    }
+}
+
+// Set the initial pre-costing number on page load
+async function setInitialPreCostingNo() {
+    const preCostingNoInput = document.getElementById('preCostingNo');
+    const nextPreCostingNo = await generateNextPreCostingNo();
+    preCostingNoInput.value = nextPreCostingNo;
+}
+
+
+
 // Function to set up all event listeners after login
 function setupEventListeners() {
     // Populate dropdown on page load
     populatePreCostingDropdown();
+
+    // Set initial pre-costing number
+    setInitialPreCostingNo();
+	
+	calculateForm();
 
     // Search button
     const searchBtn = document.getElementById('searchBtn');
@@ -451,50 +528,78 @@ function setupEventListeners() {
     } else {
         console.error('loadBtn element not found');
     }
+	
+	// Validate and format preCostingNo input
+    const preCostingNoInput = document.getElementById('preCostingNo');
+    preCostingNoInput.addEventListener('input', (e) => {
+        let value = e.target.value;
+        // Check if the input is already in the format "Pre/costing/No:XX"
+        const match = value.match(/Pre\/costing\/No:(\d+)/);
+        if (match) {
+            // If already formatted, extract the number and allow it to remain
+            value = match[1];
+        } else {
+            // Otherwise, treat as a raw number
+            value = value.replace(/\D/g, ''); // Remove non-digits
+            if (value === '') {
+                e.target.value = 'Pre/costing/No:01';
+                return;
+            }
+        }
+        value = parseInt(value, 10);
+        if (value < 1) value = 1;
+        if (value > 10000000) value = 10000000;
+        const formattedNumber = value < 10 ? `0${value}` : value;
+        e.target.value = `Pre/costing/No:${formattedNumber}`;
+    });
+
 
     // Clear button
-const clearBtn = document.getElementById('clearBtn');
-if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-        if (!isLoggedIn) {
-            alert('Please log in to perform this action.');
-            return;
-        }
-        // Clear input fields
-        document.querySelectorAll('input:not([type="button"]):not([type="submit"])').forEach(input => {
-            if (!input.readOnly) input.value = '';
+    const clearBtn = document.getElementById('clearBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+            if (!isLoggedIn) {
+                alert('Please log in to perform this action.');
+                return;
+            }
+            // Clear input fields
+            document.querySelectorAll('input:not([type="button"]):not([type="submit"])').forEach(input => {
+                if (!input.readOnly) input.value = '';
+            });
+
+            // Clear result fields
+            document.querySelectorAll('.result-field').forEach(field => {
+                field.value = '0.00';
+            });
+
+            // Clear result cells in Warp and Weft tables
+            document.querySelectorAll('#warpCalculationTable .result-cell, #weftCalculationTable .result-cell').forEach(cell => {
+                cell.textContent = '0.00';
+            });
+
+            // Reset Warp and Weft tables
+            const warpTbody = document.getElementById('warpCalculationTable').querySelector('tbody');
+            const weftTbody = document.getElementById('weftCalculationTable').querySelector('tbody');
+            warpTbody.innerHTML = '';
+            weftTbody.innerHTML = '';
+
+            // Add one empty row to each table
+            addEmptyWarpRow(warpTbody);
+            addEmptyWeftRow(weftTbody);
+
+            // Reset pre-costing number
+            await setInitialPreCostingNo();
+
+            calculateForm();
         });
-
-        // Clear result fields
-        document.querySelectorAll('.result-field').forEach(field => {
-            field.value = '0.00';
-        });
-
-        // Clear result cells in Warp and Weft tables
-        document.querySelectorAll('#warpCalculationTable .result-cell, #weftCalculationTable .result-cell').forEach(cell => {
-            cell.textContent = '0.00';
-        });
-
-        // Reset Warp and Weft tables
-        const warpTbody = document.getElementById('warpCalculationTable').querySelector('tbody');
-        const weftTbody = document.getElementById('weftCalculationTable').querySelector('tbody');
-        warpTbody.innerHTML = '';
-        weftTbody.innerHTML = '';
-
-        // Add one empty row to each table
-        addEmptyWarpRow(warpTbody);
-        addEmptyWeftRow(weftTbody);
-
-        calculateForm();
-    });
-} else {
-    console.error('clearBtn element not found');
-}
+    } else {
+        console.error('clearBtn element not found');
+    }
 
     // Reset button
     const resetBtn = document.getElementById('resetBtn');
     if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
+        resetBtn.addEventListener('click', async () => {
             if (!isLoggedIn) {
                 alert('Please log in to perform this action.');
                 return;
@@ -502,6 +607,10 @@ if (clearBtn) {
             document.querySelectorAll('input:not([type="button"]):not([type="submit"])').forEach(input => {
                 if (!input.readOnly) input.value = input.defaultValue || '';
             });
+
+            // Reset pre-costing number
+            await setInitialPreCostingNo();
+
             calculateForm();
         });
     } else {
@@ -510,33 +619,33 @@ if (clearBtn) {
 
     // Add warp row
     const addWarpRowBtn = document.querySelector('.add-warp-row');
-    if (addWarpRowBtn) {
-        addWarpRowBtn.addEventListener('click', () => {
-            if (!isLoggedIn) {
-                alert('Please log in to perform this action.');
-                return;
-            }
-            const tbody = document.getElementById('warpCalculationTable').querySelector('tbody');
-            addEmptyWarpRow(tbody);
-        });
-    } else {
-        console.error('add-warp-row element not found');
-    }
+if (addWarpRowBtn) {
+    addWarpRowBtn.addEventListener('click', () => {
+        if (!isLoggedIn) {
+            alert('Please log in to perform this action.');
+            return;
+        }
+        const tbody = document.getElementById('warpCalculationTable').querySelector('tbody');
+        addEmptyWarpRow(tbody);
+    });
+} else {
+    console.error('add-warp-row element not found');
+}
 
     // Add weft row
     const addWeftRowBtn = document.querySelector('.add-weft-row');
-    if (addWeftRowBtn) {
-        addWeftRowBtn.addEventListener('click', () => {
-            if (!isLoggedIn) {
-                alert('Please log in to perform this action.');
-                return;
-            }
-            const tbody = document.getElementById('weftCalculationTable').querySelector('tbody');
-            addEmptyWeftRow(tbody);
-        });
-    } else {
-        console.error('add-weft-row element not found');
-    }
+if (addWeftRowBtn) {
+    addWeftRowBtn.addEventListener('click', () => {
+        if (!isLoggedIn) {
+            alert('Please log in to perform this action.');
+            return;
+        }
+        const tbody = document.getElementById('weftCalculationTable').querySelector('tbody');
+        addEmptyWeftRow(tbody);
+    });
+} else {
+    console.error('add-weft-row element not found');
+}
 
     // Event delegation for input changes in Warp and Weft tables
     document.addEventListener('input', (e) => {
@@ -597,7 +706,7 @@ document.getElementById('loginBtn').addEventListener('click', () => {
         calculateForm();
     } else {
         console.log('Login failed: Incorrect password');
-        alert('Incorrect password! Please try again. Use "password123".');
+        alert('Incorrect password! Please try again. Use "pass123".');
         passwordInput.value = ''; // Clear the input
     }
 });
@@ -871,29 +980,27 @@ const PreCostingCalculator = {
         const netProfitPerYd = salesPrice - netBreakEvenCostPerYd;
         const grandTotalProfit = formData.orderQuantity * netProfitPerYd;
         const grandTotalProfitPercent = this.calculatePercentage(grandTotalProfit, grandTotalBECost);
-        const totalSalesValue = formData.orderQuantity * salesPrice;
+        const totalSalesValue = this.calculateTotalValue(salesPrice, formData.orderQuantity);
         const upchargeNetProfit = upchargeSalesPrice - netBreakEvenCostPerYd;
         const upchargeGrandTotalProfit = formData.orderQuantity * upchargeNetProfit;
         const upGrandTotalProfitPercent = this.calculatePercentage(upchargeGrandTotalProfit, grandTotalBECost);
-        const upchargeTotalSalesValue = formData.orderQuantity * upchargeSalesPrice;
+        const upchargeTotalSalesValue = this.calculateTotalValue(upchargeSalesPrice, formData.orderQuantity);
 
         const totalPreCostTk = salesPrice;
+        const totalPreCostUSD = formData.dollarRateTk ? totalPreCostTk / formData.dollarRateTk : 0;
         const totalUpchargePreCostTk = upchargeSalesPrice;
-        const totalPreCostUSD = salesPrice / formData.dollarRateTk;
-        const totalUpchargePreCostUSD = totalUpchargePreCostTk / formData.dollarRateTk;
+        const totalUpchargePreCostUSD = formData.dollarRateTk ? totalUpchargePreCostTk / formData.dollarRateTk : 0;
 
-        const warpDetails = formData.warpDetails || [];
-        const weftDetails = formData.weftDetails || [];
-        const warpCountAvg = warpDetails.length ? (warpDetails.reduce((sum, d) => sum + d.count, 0) / warpDetails.length) : 1;
-        const weftCountAvg = weftDetails.length ? (weftDetails.reduce((sum, d) => sum + d.count, 0) / weftDetails.length) : 1;
-        const warpTotalGSM = (formData.epi / warpCountAvg) * (23.25 + (23.25 * formData.warpCrimp / 100));
-        const weftTotalGSM = (formData.ppi / weftCountAvg) * (23.25 + (23.25 * formData.weftCrimp / 100));
+        const warpTotalGSM = warpFinishConsump * 1000 / (formData.finishWidth * 0.0254);
+        const weftTotalGSM = weftFinishConsump * 1000 / (formData.finishWidth * 0.0254);
         const totalGSM = warpTotalGSM + weftTotalGSM;
-        const weightFinishFabric = 0.0232 * formData.orderQuantity * totalGSM * formData.finishWidth;
-        const warpCoverFactor = this.calculateCoverFactor(formData.epi, warpCountAvg);
-        const weftCoverFactor = this.calculateCoverFactor(formData.ppi, weftCountAvg);
-        const weaveFactor = this.constants.weaveConstants[formData.weaveType] || 1;
-        const totalCoverFactor = (warpCoverFactor + weftCoverFactor) * weaveFactor;
+        const weightFinishFabric = totalFinishConsump * formData.orderQuantity;
+
+        const avgWarpCount = formData.warpDetails.reduce((sum, d) => sum + (d.count || 0), 0) / (formData.warpDetails.length || 1);
+        const avgWeftCount = formData.weftDetails.reduce((sum, d) => sum + (d.count || 0), 0) / (formData.weftDetails.length || 1);
+        const warpCoverFactor = this.calculateCoverFactor(formData.epi, avgWarpCount);
+        const weftCoverFactor = this.calculateCoverFactor(formData.ppi, avgWeftCount);
+        const totalCoverFactor = warpCoverFactor + weftCoverFactor - (warpCoverFactor * weftCoverFactor / (warpCoverFactor + weftCoverFactor));
 
         return {
             inputSummary: {
@@ -918,7 +1025,8 @@ const PreCostingCalculator = {
                 epi: formData.epi,
                 ppi: formData.ppi,
                 weaveType: formData.weaveType,
-                weftCrimp: formData.weftCrimp
+                weftCrimp: formData.weftCrimp,
+                greigeWidth: formData.greigeWidth
             },
             orderParticulars: {
                 greigeReqQuantity, requiredWarpKg, requiredWeftKg, totalRequiredKg,
@@ -931,10 +1039,14 @@ const PreCostingCalculator = {
                 weavingCost, breakEvenCostYd, salesPrice, upchargeSalesPrice
             },
             budgetCost: {
-                totalGrWarpCost, totalGrWarpCostPercent, totalGrWeftCost, totalGrWeftCostPercent,
-                graTotalGregCost, graTotalGregCostPercent, totalYDyeingCost, totalYDyeingCostPercent,
-                totalWeavingCost, totalWeavingCostPercent, totalDyeFinCost, totalDyeFinCostPercent,
-                totalCommercialCost, commercialCostPercent, grandTotalBECost, netBreakEvenCostPerYd,
+                totalGrWarpCost, totalGrWarpCostPercent,
+                totalGrWeftCost, totalGrWeftCostPercent,
+                graTotalGregCost, graTotalGregCostPercent,
+                totalYDyeingCost, totalYDyeingCostPercent,
+                totalWeavingCost, totalWeavingCostPercent,
+                totalDyeFinCost, totalDyeFinCostPercent,
+                totalCommercialCost, commercialCostPercent,
+                grandTotalBECost, netBreakEvenCostPerYd,
                 netProfitPerYd, grandTotalProfit, grandTotalProfitPercent, totalSalesValue,
                 upchargeNetProfit, upchargeGrandTotalProfit, upGrandTotalProfitPercent, upchargeTotalSalesValue
             },
@@ -953,14 +1065,46 @@ const PreCostingCalculator = {
 };
 
 function getFormData() {
-    const warpRows = document.querySelectorAll('#warpCalculationTable tbody tr:not(.total-row)');
-    const weftRows = document.querySelectorAll('#weftCalculationTable tbody tr:not(.total-row)');
+    const warpTbody = document.getElementById('warpCalculationTable').querySelector('tbody');
+    const weftTbody = document.getElementById('weftCalculationTable').querySelector('tbody');
+
+    const warpDetails = Array.from(warpTbody.querySelectorAll('tr:not(.total-row)')).map(row => ({
+        count: parseFloat(row.cells[0].querySelector('input').value) || 0,
+        repeatBreakdown: parseFloat(row.cells[1].querySelector('input').value) || 0,
+        colorName: row.cells[2].querySelector('input').value || '',
+        denting: parseFloat(row.cells[3].querySelector('input').value) || 0,
+        ratePerLbs: parseFloat(row.cells[4].querySelector('input').value) || 0,
+        dyeingCostPerKg: parseFloat(row.cells[5].querySelector('input').value) || 0
+    }));
+
+    const weftDetails = Array.from(weftTbody.querySelectorAll('tr:not(.total-row)')).map(row => ({
+        count: parseFloat(row.cells[0].querySelector('input').value) || 0,
+        repeatBreakdown: parseFloat(row.cells[1].querySelector('input').value) || 0,
+        colorName: row.cells[2].querySelector('input').value || '',
+        pickDensity: parseFloat(row.cells[3].querySelector('input').value) || 0,
+        ratePerLbs: parseFloat(row.cells[4].querySelector('input').value) || 0,
+        dyeingCostPerKg: parseFloat(row.cells[5].querySelector('input').value) || 0
+    }));
+
+    // Extract preCostingNo and handle both formatted and unformatted inputs
+    let preCostingNo = document.getElementById('preCostingNo').value || '1';
+    // Check if the input is already in the format "Pre/costing/No:XX"
+    const match = preCostingNo.match(/Pre\/costing\/No:(\d+)/);
+    if (match) {
+        // If already formatted, extract the number
+        preCostingNo = match[1]; // e.g., "03"
+    }
+    // Parse the number and reformat
+    const number = parseInt(preCostingNo, 10) || 1; // Fallback to 1 if parsing fails
+    const formattedNumber = number < 10 ? `0${number}` : number;
+    preCostingNo = `Pre/costing/No:${formattedNumber}`;
+
     return {
-        preCostingNo: document.getElementById('preCostingNo').value || '',
+        preCostingNo: preCostingNo,
         buyer: document.getElementById('buyer').value || '',
         construction: document.getElementById('construction').value || '',
         finishWidth: parseFloat(document.getElementById('finishWidth').value) || 0,
-        totalEnds: parseInt(document.getElementById('totalEnds').value) || 0,
+        totalEnds: parseFloat(document.getElementById('totalEnds').value) || 0,
         warpCrimp: parseFloat(document.getElementById('warpCrimp').value) || 0,
         ydAllow: parseFloat(document.getElementById('ydAllow').value) || 0,
         warpWast: parseFloat(document.getElementById('warpWast').value) || 0,
@@ -970,7 +1114,7 @@ function getFormData() {
         dyeingFinishingRate: parseFloat(document.getElementById('dyeingFinishingRate').value) || 0,
         commercialCostInput: parseFloat(document.getElementById('commercialCostInput').value) || 0,
         profit: parseFloat(document.getElementById('profit').value) || 0,
-        orderQuantity: parseInt(document.getElementById('orderQuantity').value) || 0,
+        orderQuantity: parseFloat(document.getElementById('orderQuantity').value) || 0,
         pickLength: parseFloat(document.getElementById('pickLength').value) || 0,
         preCostingDate: document.getElementById('preCostingDate').value || '',
         dollarRateTk: parseFloat(document.getElementById('dollarRateTk').value) || 0,
@@ -978,23 +1122,9 @@ function getFormData() {
         ppi: parseFloat(document.getElementById('ppi').value) || 0,
         weaveType: document.getElementById('weaveType').value || '',
         weftCrimp: parseFloat(document.getElementById('weftCrimp').value) || 0,
-		greigeWidth: parseFloat(document.getElementById('greigeWidth').value) || 0,
-        warpDetails: Array.from(warpRows).map(row => ({
-            count: parseFloat(row.cells[0].querySelector('input').value) || 0,
-            repeatBreakdown: parseFloat(row.cells[1].querySelector('input').value) || 0,
-            colorName: row.cells[2].querySelector('input').value || '',
-            denting: parseInt(row.cells[3].querySelector('input').value) || 0,
-            ratePerLbs: parseFloat(row.cells[4].querySelector('input').value) || 0,
-            dyeingCostPerKg: parseFloat(row.cells[5].querySelector('input').value) || 0
-        })),
-        weftDetails: Array.from(weftRows).map(row => ({
-            count: parseFloat(row.cells[0].querySelector('input').value) || 0,
-            repeatBreakdown: parseFloat(row.cells[1].querySelector('input').value) || 0,
-            colorName: row.cells[2].querySelector('input').value || '',
-            pickDensity: parseInt(row.cells[3].querySelector('input').value) || 0,
-            ratePerLbs: parseFloat(row.cells[4].querySelector('input').value) || 0,
-            dyeingCostPerKg: parseFloat(row.cells[5].querySelector('input').value) || 0
-        }))
+        greigeWidth: parseFloat(document.getElementById('greigeWidth').value) || 0,
+        warpDetails: warpDetails,
+        weftDetails: weftDetails
     };
 }
 
@@ -1002,23 +1132,15 @@ function updateWarpCalculationTable(results, formData) {
     const tbody = document.getElementById('warpCalculationTable').querySelector('tbody');
     if (!tbody) return;
 
+    // Remove existing total row
     const existingTotalRow = tbody.querySelector('.total-row');
     if (existingTotalRow) existingTotalRow.remove();
 
     const warpPatterns = results.warpPatterns.patterns || [];
     const warpDetails = formData.warpDetails || [];
 
-    Array.from(tbody.rows).forEach((row, index) => {
-        while (row.cells.length < 16) {
-            const newCell = row.insertCell(-1);
-            newCell.className = 'result-cell';
-        }
-        if (row.cells.length > 16) {
-            while (row.cells.length > 16) {
-                row.deleteCell(-1);
-            }
-        }
-
+    // Update existing rows with pattern data
+    Array.from(tbody.querySelectorAll('tr:not(.total-row)')).forEach((row, index) => {
         const pattern = warpPatterns[index];
         if (pattern) {
             row.cells[6].textContent = pattern.repeatEndsPerColor.toFixed(2) || '0.00';
@@ -1034,24 +1156,25 @@ function updateWarpCalculationTable(results, formData) {
         }
     });
 
+    // Add total row
     const totalRow = document.createElement('tr');
     totalRow.className = 'total-row';
     totalRow.innerHTML = `
-        <td>${(warpDetails.reduce((sum, d) => sum + d.count, 0) / warpDetails.length || 0).toFixed(2)}</td>
-        <td>${(warpDetails.reduce((sum, d) => sum + d.repeatBreakdown, 0) || 0).toFixed(2)}</td>
+        <td>${(warpDetails.reduce((sum, d) => sum + (d.count || 0), 0) / warpDetails.length || 0).toFixed(2)}</td>
+        <td>${(warpDetails.reduce((sum, d) => sum + (d.repeatBreakdown || 0), 0) || 0).toFixed(2)}</td>
         <td>-</td>
-        <td>${(warpDetails.reduce((sum, d) => sum + d.denting, 0) / warpDetails.length || 0).toFixed(2)}</td>
-        <td>${(warpDetails.reduce((sum, d) => sum + d.ratePerLbs, 0) / warpDetails.length || 0).toFixed(2)}</td>
-        <td>${(warpDetails.reduce((sum, d) => sum + d.dyeingCostPerKg, 0) / warpDetails.length || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.repeatEndsPerColor, 0) || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.patternTotalEnds, 0) || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.dentNumbersInFullWidth, 0) || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.greigeYarnRate, 0) / warpPatterns.length || 0).toFixed(1)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.consumption, 0) || 0).toFixed(4)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.yarnCost, 0) || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.colorCost, 0) || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.warpTotalCost, 0) || 0).toFixed(2)}</td>
-        <td>${(warpPatterns.reduce((sum, p) => sum + p.requiredGreige, 0) || 0).toFixed(2)}</td>
+        <td>${(warpDetails.reduce((sum, d) => sum + (d.denting || 0), 0) / warpDetails.length || 0).toFixed(2)}</td>
+        <td>${(warpDetails.reduce((sum, d) => sum + (d.ratePerLbs || 0), 0) / warpDetails.length || 0).toFixed(2)}</td>
+        <td>${(warpDetails.reduce((sum, d) => sum + (d.dyeingCostPerKg || 0), 0) / warpDetails.length || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.repeatEndsPerColor || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.patternTotalEnds || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.dentNumbersInFullWidth || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.greigeYarnRate || 0), 0) / warpPatterns.length || 0).toFixed(1)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.consumption || 0), 0) || 0).toFixed(4)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.yarnCost || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.colorCost || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.warpTotalCost || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(warpPatterns.reduce((sum, p) => sum + (p.requiredGreige || 0), 0) || 0).toFixed(2)}</td>
         <td>-</td>
     `;
     tbody.appendChild(totalRow);
@@ -1061,23 +1184,15 @@ function updateWeftCalculationTable(results, formData) {
     const tbody = document.getElementById('weftCalculationTable').querySelector('tbody');
     if (!tbody) return;
 
+    // Remove existing total row
     const existingTotalRow = tbody.querySelector('.total-row');
     if (existingTotalRow) existingTotalRow.remove();
 
     const weftPatterns = results.weftPatterns.patterns || [];
     const weftDetails = formData.weftDetails || [];
 
-    Array.from(tbody.rows).forEach((row, index) => {
-        while (row.cells.length < 15) {
-            const newCell = row.insertCell(-1);
-            newCell.className = 'result-cell';
-        }
-        if (row.cells.length > 15) {
-            while (row.cells.length > 15) {
-                row.deleteCell(-1);
-            }
-        }
-
+    // Update existing rows with pattern data
+    Array.from(tbody.querySelectorAll('tr:not(.total-row)')).forEach((row, index) => {
         const pattern = weftPatterns[index];
         if (pattern) {
             row.cells[6].textContent = pattern.repeatPicksPerColor.toFixed(2) || '0.00';
@@ -1092,23 +1207,24 @@ function updateWeftCalculationTable(results, formData) {
         }
     });
 
+    // Add total row
     const totalRow = document.createElement('tr');
     totalRow.className = 'total-row';
     totalRow.innerHTML = `
-        <td>${(weftDetails.reduce((sum, d) => sum + d.count, 0) / weftDetails.length || 0).toFixed(2)}</td>
-        <td>${(weftDetails.reduce((sum, d) => sum + d.repeatBreakdown, 0) || 0).toFixed(2)}</td>
+        <td>${(weftDetails.reduce((sum, d) => sum + (d.count || 0), 0) / weftDetails.length || 0).toFixed(2)}</td>
+        <td>${(weftDetails.reduce((sum, d) => sum + (d.repeatBreakdown || 0), 0) || 0).toFixed(2)}</td>
         <td>-</td>
-        <td>${(weftDetails.reduce((sum, d) => sum + d.pickDensity, 0) / weftDetails.length || 0).toFixed(2)}</td>
-        <td>${(weftDetails.reduce((sum, d) => sum + d.ratePerLbs, 0) / weftDetails.length || 0).toFixed(2)}</td>
-        <td>${(weftDetails.reduce((sum, d) => sum + d.dyeingCostPerKg, 0) / weftDetails.length || 0).toFixed(2)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.repeatPicksPerColor, 0) || 0).toFixed(2)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.patternTotalPicks, 0) || 0).toFixed(2)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.greigeYarnRate, 0) / weftPatterns.length || 0).toFixed(1)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.consumption, 0) || 0).toFixed(4)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.yarnCost, 0) || 0).toFixed(2)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.colorCost, 0) || 0).toFixed(2)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.weftTotalCost, 0) || 0).toFixed(2)}</td>
-        <td>${(weftPatterns.reduce((sum, p) => sum + p.requiredGreige, 0) || 0).toFixed(2)}</td>
+        <td>${(weftDetails.reduce((sum, d) => sum + (d.pickDensity || 0), 0) / weftDetails.length || 0).toFixed(2)}</td>
+        <td>${(weftDetails.reduce((sum, d) => sum + (d.ratePerLbs || 0), 0) / weftDetails.length || 0).toFixed(2)}</td>
+        <td>${(weftDetails.reduce((sum, d) => sum + (d.dyeingCostPerKg || 0), 0) / weftDetails.length || 0).toFixed(2)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.repeatPicksPerColor || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.patternTotalPicks || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.greigeYarnRate || 0), 0) / weftPatterns.length || 0).toFixed(1)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.consumption || 0), 0) || 0).toFixed(4)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.yarnCost || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.colorCost || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.weftTotalCost || 0), 0) || 0).toFixed(2)}</td>
+        <td>${(weftPatterns.reduce((sum, p) => sum + (p.requiredGreige || 0), 0) || 0).toFixed(2)}</td>
         <td>-</td>
     `;
     tbody.appendChild(totalRow);
@@ -1184,6 +1300,15 @@ function updatePreCostResults(results) {
     safeSetValue('warpCoverFactor', results.technicalSpecs.warpCoverFactor);
     safeSetValue('weftCoverFactor', results.technicalSpecs.weftCoverFactor);
     safeSetValue('totalCoverFactor', results.technicalSpecs.totalCoverFactor);
+	
+	// In updateWarpCalculationTable()
+//console.log('Updated currentPreCostingData.warpDetails:', currentPreCostingData.warpDetails);
+
+    // In updateWeftCalculationTable()
+//console.log('Updated currentPreCostingData.weftDetails:', currentPreCostingData.weftDetails);
+
+    console.log('Updated currentPreCostingData.warpDetails:', currentPreCostingData?.warpDetails || 'Not available');
+    console.log('Updated currentPreCostingData.weftDetails:', currentPreCostingData?.weftDetails || 'Not available');
 }
 
 function calculateForm() {
@@ -1192,6 +1317,16 @@ function calculateForm() {
         return;
     }
     try {
+	
+	    // Ensure currentPreCostingData has the required structure
+        if (!currentPreCostingData) {
+            currentPreCostingData = {
+                preCostingData: null,
+                warpDetails: [],
+                weftDetails: []
+            };
+        }
+		
         const formData = getFormData();
         console.log('Calculating with Form Data:', formData);
         const results = PreCostingCalculator.calculateFullPreCosting(formData);
@@ -1260,7 +1395,7 @@ async function populatePreCostingDropdown() {
             data.forEach(item => {
                 const option = document.createElement('option');
                 option.value = item.pre_costing_no;
-                option.textContent = item.pre_costing_no;
+                option.textContent = item.pre_costing_no; // Displays "Pre/costing/No:XXXXXXXX"
                 dropdown.appendChild(option);
             });
             console.log('Dropdown populated with', data.length, 'options');
@@ -1270,6 +1405,8 @@ async function populatePreCostingDropdown() {
     } catch (error) {
         console.error('Error populating dropdown:', error);
         alert('Failed to load pre-costing numbers.');
+		const dropdown = document.getElementById('preCostingDropdown');
+        dropdown.innerHTML = '<option value="">Select Pre-costing No (Offline)</option>';
     }
 }
 
@@ -1301,8 +1438,28 @@ async function searchPreCosting() {
 
         console.log('Search data retrieved:', data);
 
-        // Autofill input fields
-        document.getElementById('preCostingNo').value = data.pre_costing_no || '';
+        const { data: warpData, error: warpError } = await supabase
+            .from('warp_details')
+            .select('*')
+            .eq('pre_costing_no', selectedPreCostingNo);
+
+        if (warpError) throw warpError;
+
+        const { data: weftData, error: weftError } = await supabase
+            .from('weft_details')
+            .select('*')
+            .eq('pre_costing_no', selectedPreCostingNo);
+
+        if (weftError) throw weftError;
+
+        currentPreCostingData = {
+            preCostingData: data,
+            warpDetails: warpData,
+            weftDetails: weftData
+        };
+
+        // Set the full pre_costing_no value
+        document.getElementById('preCostingNo').value = data.pre_costing_no;
         document.getElementById('buyer').value = data.buyer || '';
         document.getElementById('construction').value = data.construction || '';
         document.getElementById('finishWidth').value = data.finish_width || '';
@@ -1316,7 +1473,6 @@ async function searchPreCosting() {
         document.getElementById('dyeingFinishingRate').value = data.dye_finish_rate || '';
         document.getElementById('commercialCostInput').value = data.commercial_cost || '';
         document.getElementById('profit').value = data.profit || '';
-        // Add missing fields
         document.getElementById('epi').value = data.epi || '';
         document.getElementById('ppi').value = data.ppi || '';
         document.getElementById('weaveType').value = data.weave_type || '';
@@ -1327,7 +1483,6 @@ async function searchPreCosting() {
         document.getElementById('dollarRateTk').value = data.dollar_rate_tk || '';
         document.getElementById('preCostingDate').value = data.pre_costing_date || '';
 
-        // Autofill result fields
         document.getElementById('greigeReqQuantity').value = data.greige_req_quantity || '';
         document.getElementById('requiredWarpKg').value = data.required_warp_yarn || '';
         document.getElementById('requiredWeftKg').value = data.required_weft_yarn || '';
@@ -1368,23 +1523,74 @@ async function searchPreCosting() {
         document.getElementById('totalUpchargePreCostTk').value = data.total_upcharged_pre_cost_tk || '';
         document.getElementById('totalUpchargePreCostUSD').value = data.total_upcharged_pre_cost_usd || '';
 
-        // Repopulate Warp and Weft tables
         const warpTbody = document.getElementById('warpCalculationTable').querySelector('tbody');
         const weftTbody = document.getElementById('weftCalculationTable').querySelector('tbody');
         warpTbody.innerHTML = '';
         weftTbody.innerHTML = '';
 
-        // Add default rows
-        addEmptyWarpRow(warpTbody);
-        addEmptyWeftRow(weftTbody);
+        if (warpData && warpData.length > 0) {
+            warpData.forEach(warpDetail => {
+                const newRow = document.createElement('tr');
+                newRow.className = 'pattern-row';
+                newRow.innerHTML = `
+                    <td><input type="number" class="form-control" value="${warpDetail.warp_count || ''}"></td>
+                    <td><input type="number" class="form-control" value="${warpDetail.repeat_breakdown || ''}"></td>
+                    <td><input type="text" class="form-control" value="${warpDetail.color_name || ''}"></td>
+                    <td><input type="number" class="form-control" value="${warpDetail.denting || ''}"></td>
+                    <td><input type="number" class="form-control" value="${warpDetail.rate_per_lbs || ''}"></td>
+                    <td><input type="number" class="form-control" value="${warpDetail.dyeing_cost_per_kg || ''}"></td>
+                    <td class="result-cell">${warpDetail.repeat_ends_per_color || '0.00'}</td>
+                    <td class="result-cell">${warpDetail.pattern_total_ends || '0.00'}</td>
+                    <td class="result-cell">${warpDetail.dent_numbers_in_full_width || '0.00'}</td>
+                    <td class="result-cell">${warpDetail.greige_yarn_rate || '0.0'}</td>
+                    <td class="result-cell">${warpDetail.consumption || '0.0000'}</td>
+                    <td class="result-cell">${warpDetail.yarn_cost || '0.00'}</td>
+                    <td class="result-cell">${warpDetail.color_cost || '0.00'}</td>
+                    <td class="result-cell">${warpDetail.warp_total_cost || '0.00'}</td>
+                    <td class="result-cell">${warpDetail.required_greige || '0.00'}</td>
+                    <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
+                `;
+                warpTbody.appendChild(newRow);
+            });
+        } else {
+            addEmptyWarpRow(warpTbody);
+        }
 
-        calculateForm(); // Recalculate to ensure consistency
-        alert('Pre-costing data loaded successfully!');
+        if (weftData && weftData.length > 0) {
+            weftData.forEach(weftDetail => {
+                const newRow = document.createElement('tr');
+                newRow.className = 'pattern-row';
+                newRow.innerHTML = `
+                    <td><input type="number" class="form-control" value="${weftDetail.weft_count || ''}"></td>
+                    <td><input type="number" class="form-control" value="${weftDetail.repeat_breakdown || ''}"></td>
+                    <td><input type="text" class="form-control" value="${weftDetail.color_name || ''}"></td>
+                    <td><input type="number" class="form-control" value="${weftDetail.pick_density || ''}"></td>
+                    <td><input type="number" class="form-control" value="${weftDetail.rate_per_lbs || ''}"></td>
+                    <td><input type="number" class="form-control" value="${weftDetail.dyeing_cost_per_kg || ''}"></td>
+                    <td class="result-cell">${weftDetail.repeat_picks_per_color || '0.00'}</td>
+                    <td class="result-cell">${weftDetail.pattern_total_picks || '0.00'}</td>
+                    <td class="result-cell">${weftDetail.greige_yarn_rate || '0.0'}</td>
+                    <td class="result-cell">${weftDetail.consumption || '0.0000'}</td>
+                    <td class="result-cell">${weftDetail.yarn_cost || '0.00'}</td>
+                    <td class="result-cell">${weftDetail.color_cost || '0.00'}</td>
+                    <td class="result-cell">${weftDetail.weft_total_cost || '0.00'}</td>
+                    <td class="result-cell">${weftDetail.required_greige || '0.00'}</td>
+                    <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
+                `;
+                weftTbody.appendChild(newRow);
+            });
+        } else {
+            addEmptyWeftRow(weftTbody);
+        }
+		calculateForm(); // it can be removed to avoid recalculating, as we want to use the Supabase data as-is
+        // alert('Pre-costing data loaded successfully!');
     } catch (error) {
         console.error('Error searching pre-costing:', error);
         alert(`Failed to load pre-costing data: ${error.message}`);
     }
 }
+
+
 
 // Save data to Supabase PostgreSQL
 async function saveToPostgreSQL() {
@@ -1393,10 +1599,27 @@ async function saveToPostgreSQL() {
         return;
     }
     try {
+        // Generate the next pre-costing number if it's a new entry
+        let preCostingNo = document.getElementById('preCostingNo').value;
+        const { data: existingData, error: checkError } = await supabase
+            .from('pre_costing_data')
+            .select('pre_costing_no')
+            .eq('pre_costing_no', preCostingNo)
+            .single();
+
+        if (checkError && checkError.code !== 'PGRST116') throw checkError;
+
+        if (!existingData) {
+            preCostingNo = await generateNextPreCostingNo();
+            document.getElementById('preCostingNo').value = preCostingNo;
+        }
+
         const formData = getFormData();
         const results = PreCostingCalculator.calculateFullPreCosting(formData);
+
+        // Prepare data for pre_costing_data table
         const dataToSave = {
-            pre_costing_no: results.inputSummary.preCostingNo,
+            pre_costing_no: preCostingNo,
             buyer: results.inputSummary.buyer,
             construction: results.inputSummary.construction,
             finish_width: results.inputSummary.finishWidth,
@@ -1449,244 +1672,440 @@ async function saveToPostgreSQL() {
             total_pre_cost_usd: results.totalPreCostingValues.totalPreCostUSD,
             total_upcharged_pre_cost_tk: results.totalPreCostingValues.totalUpchargePreCostTk,
             total_upcharged_pre_cost_usd: results.totalPreCostingValues.totalUpchargePreCostUSD,
-            // Add missing fields
+            order_quantity: results.inputSummary.orderQuantity,
+            pick_length: results.inputSummary.pickLength,
+            pre_costing_date: results.inputSummary.preCostingDate,
+            dollar_rate_tk: results.inputSummary.dollarRateTk,
             epi: results.inputSummary.epi,
             ppi: results.inputSummary.ppi,
             weave_type: results.inputSummary.weaveType,
-            greige_width: formData.greigeWidth || 0, // Assuming greigeWidth is in formData
             weft_crimp: results.inputSummary.weftCrimp,
-            order_quantity: results.inputSummary.orderQuantity,
-            pick_length: results.inputSummary.pickLength,
-            dollar_rate_tk: results.inputSummary.dollarRateTk,
-            pre_costing_date: results.inputSummary.preCostingDate
+            greige_width: results.inputSummary.greigeWidth
         };
 
-        const { data, error } = await supabase
+        const { data: savedData, error: saveError } = await supabase
             .from('pre_costing_data')
-            .upsert(dataToSave, { onConflict: ['pre_costing_no'] });
+            .upsert([dataToSave], { onConflict: 'pre_costing_no' })
+            .select();
 
-        if (error) throw error;
+        if (saveError) throw saveError;
+        console.log('Saved to pre_costing_data:', savedData);
 
-        alert('Data saved to PostgreSQL successfully!');
-        populatePreCostingDropdown(); // Refresh dropdown
-    } catch (error) {
-        console.error('Error saving to PostgreSQL:', error);
-        alert('Failed to save data to PostgreSQL.');
-    }
-}
-
-// Export data to CSV
-async function exportToCSV() {
-    if (!isLoggedIn) {
-        alert('Please log in to perform this action.');
-        return;
-    }
-    try {
-        const { data, error } = await supabase
-            .from('pre_costing_data')
-            .select('*')
-            .order('pre_costing_no', { ascending: true });
-
-        if (error) throw error;
-        if (!data || data.length === 0) {
-            alert('No data available to export.');
-            return;
-        }
-
-        const headers = Object.keys(data[0]);
-        const csvRows = [
-            headers.join(','), // CSV header
-            ...data.map(row => headers.map(header => {
-                const value = row[header];
-                return typeof value === 'string' && value.includes(',')
-                    ? `"${value.replace(/"/g, '""')}"`
-                    : value;
-            }).join(','))
-        ];
-
-        const csvContent = csvRows.join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'pre_costing_data.csv');
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    } catch (error) {
-        console.error('Error exporting to CSV:', error);
-        alert('Failed to export data to CSV.');
-    }
-}
-
-// Export data to SQL
-async function exportToSQL() {
-    if (!isLoggedIn) {
-        alert('Please log in to perform this action.');
-        return;
-    }
-    try {
-        const { data, error } = await supabase
-            .from('pre_costing_data')
-            .select('*')
-            .order('pre_costing_no', { ascending: true });
-
-        if (error) throw error;
-        if (!data || data.length === 0) {
-            alert('No data available to export.');
-            return;
-        }
-
-        const tableName = 'pre_costing_data';
-        const headers = Object.keys(data[0]);
-        const sqlStatements = data.map(row => {
-            const values = headers.map(header => {
-                const value = row[header];
-                if (value === null || value === undefined) return 'NULL';
-                if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
-                return value;
-            });
-            return `INSERT INTO ${tableName} (${headers.join(', ')}) VALUES (${values.join(', ')});`;
+        // Prepare and save Warp Details with result fields
+        const warpDetailsToSave = formData.warpDetails.map((detail, index) => {
+            const pattern = results.warpPatterns.patterns[index] || {};
+            return {
+                pre_costing_no: preCostingNo,
+                warp_count: detail.count,
+                repeat_breakdown: detail.repeatBreakdown,
+                color_name: detail.colorName,
+                denting: detail.denting,
+                rate_per_lbs: detail.ratePerLbs,
+                dyeing_cost_per_kg: detail.dyeingCostPerKg,
+                repeat_ends_per_color: pattern.repeatEndsPerColor || 0,
+                pattern_total_ends: pattern.patternTotalEnds || 0,
+                dent_numbers_in_full_width: pattern.dentNumbersInFullWidth || 0,
+                greige_yarn_rate: pattern.greigeYarnRate || 0,
+                consumption: pattern.consumption || 0,
+                yarn_cost: pattern.yarnCost || 0,
+                color_cost: pattern.colorCost || 0,
+                warp_total_cost: pattern.warpTotalCost || 0,
+                required_greige: pattern.requiredGreige || 0
+            };
         });
 
-        const sqlContent = sqlStatements.join('\n');
-        const blob = new Blob([sqlContent], { type: 'text/sql;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'pre_costing_data.sql');
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const { error: deleteWarpError } = await supabase
+            .from('warp_details')
+            .delete()
+            .eq('pre_costing_no', preCostingNo);
+
+        if (deleteWarpError) throw deleteWarpError;
+
+        if (warpDetailsToSave.length > 0) {
+            const { error: warpError } = await supabase
+                .from('warp_details')
+                .insert(warpDetailsToSave);
+
+            if (warpError) throw warpError;
+            console.log('Saved warp details:', warpDetailsToSave);
+        }
+
+        // Prepare and save Weft Details with result fields
+        const weftDetailsToSave = formData.weftDetails.map((detail, index) => {
+            const pattern = results.weftPatterns.patterns[index] || {};
+            return {
+                pre_costing_no: preCostingNo,
+                weft_count: detail.count,
+                repeat_breakdown: detail.repeatBreakdown,
+                color_name: detail.colorName,
+                pick_density: detail.pickDensity,
+                rate_per_lbs: detail.ratePerLbs,
+                dyeing_cost_per_kg: detail.dyeingCostPerKg,
+                repeat_picks_per_color: pattern.repeatPicksPerColor || 0,
+                pattern_total_picks: pattern.patternTotalPicks || 0,
+                greige_yarn_rate: pattern.greigeYarnRate || 0,
+                consumption: pattern.consumption || 0,
+                yarn_cost: pattern.yarnCost || 0,
+                color_cost: pattern.colorCost || 0,
+                weft_total_cost: pattern.weftTotalCost || 0,
+                required_greige: pattern.requiredGreige || 0
+            };
+        });
+
+        const { error: deleteWeftError } = await supabase
+            .from('weft_details')
+            .delete()
+            .eq('pre_costing_no', preCostingNo);
+
+        if (deleteWeftError) throw deleteWeftError;
+
+        if (weftDetailsToSave.length > 0) {
+            const { error: weftError } = await supabase
+                .from('weft_details')
+                .insert(weftDetailsToSave);
+
+            if (weftError) throw weftError;
+            console.log('Saved weft details:', weftDetailsToSave);
+        }
+
+        await populatePreCostingDropdown();
+
+        // Clear currentPreCostingData to ensure export functions use the latest data
+        currentPreCostingData = null;
+
+        alert('Data saved successfully to Supabase!');
+        console.log('Data saved successfully with pre_costing_no:', preCostingNo);
     } catch (error) {
-        console.error('Error exporting to SQL:', error);
-        alert('Failed to export data to SQL.');
+        console.error('Error saving to Supabase:', error);
+        alert(`Failed to save data: ${error.message}`);
     }
 }
 
-// Helper function to add empty warp row
-function addEmptyWarpRow(tbody) {
-    const newRow = document.createElement('tr');
-    newRow.className = 'pattern-row';
-    newRow.innerHTML = `
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="text" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.0</td>
-        <td class="result-cell">0.0000</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
-    `;
-    tbody.insertBefore(newRow, tbody.querySelector('.total-row'));
-    calculateForm();
+// Export to CSV
+function exportToCSV() {
+    if (!isLoggedIn) {
+        alert('Please log in to perform this action.');
+        return;
+    }
+	calculateForm(); // Ensure calculations are up-to-date
+    if (!currentPreCostingData) {
+        alert('No pre-costing data loaded. Please search for a pre-costing number first.');
+        return;
+    }
+    if (!currentPreCostingData) {
+        alert('No pre-costing data loaded. Please search for a pre-costing number first.');
+        return;
+    }
+
+    const { preCostingData, warpDetails, weftDetails } = currentPreCostingData;
+
+    // Calculate Warp Details totals
+    const warpTotals = {
+        pattern_total_ends: 0,
+        dent_numbers_in_full_width: 0,
+        greige_yarn_rate: 0,
+        consumption: 0,
+        yarn_cost: 0,
+        color_cost: 0,
+        warp_total_cost: 0,
+        required_greige: 0
+    };
+    warpDetails.forEach(detail => {
+        warpTotals.pattern_total_ends += detail.pattern_total_ends || 0;
+        warpTotals.dent_numbers_in_full_width += detail.dent_numbers_in_full_width || 0;
+        warpTotals.greige_yarn_rate += detail.greige_yarn_rate || 0;
+        warpTotals.consumption += detail.consumption || 0;
+        warpTotals.yarn_cost += detail.yarn_cost || 0;
+        warpTotals.color_cost += detail.color_cost || 0;
+        warpTotals.warp_total_cost += detail.warp_total_cost || 0;
+        warpTotals.required_greige += detail.required_greige || 0;
+    });
+
+    // Calculate Weft Details totals
+    const weftTotals = {
+        pattern_total_picks: 0,
+        greige_yarn_rate: 0,
+        consumption: 0,
+        yarn_cost: 0,
+        color_cost: 0,
+        weft_total_cost: 0,
+        required_greige: 0
+    };
+    weftDetails.forEach(detail => {
+        weftTotals.pattern_total_picks += detail.pattern_total_picks || 0;
+        weftTotals.greige_yarn_rate += detail.greige_yarn_rate || 0;
+        weftTotals.consumption += detail.consumption || 0;
+        weftTotals.yarn_cost += detail.yarn_cost || 0;
+        weftTotals.color_cost += detail.color_cost || 0;
+        weftTotals.weft_total_cost += detail.weft_total_cost || 0;
+        weftTotals.required_greige += detail.required_greige || 0;
+    });
+
+    // CSV content
+    let csvContent = '';
+
+    // Pre-costing Data
+    csvContent += 'Pre Costing Data\n';
+    csvContent += 'Pre Costing No,Buyer,Construction,Finish Width,Total Ends,Warp Crimp,YD Allow,Warp Wast,Weft Wast,Finish Allow,Weaving Pick Rate,Dyeing Finishing Rate,Commercial Cost,Profit,Order Quantity,Pick Length,Pre Costing Date,Dollar Rate Tk,EPI,PPI,Weave Type,Weft Crimp,Greige Width\n';
+    csvContent += `${preCostingData.pre_costing_no},${preCostingData.buyer},${preCostingData.construction},${preCostingData.finish_width},${preCostingData.total_ends},${preCostingData.warp_crimp},${preCostingData.yd_allow},${preCostingData.warp_wast},${preCostingData.weft_wast},${preCostingData.finish_allow},${preCostingData.weaving_rate},${preCostingData.dye_finish_rate},${preCostingData.commercial_cost},${preCostingData.profit},${preCostingData.order_quantity},${preCostingData.pick_length},${preCostingData.pre_costing_date},${preCostingData.dollar_rate_tk},${preCostingData.epi},${preCostingData.ppi},${preCostingData.weave_type},${preCostingData.weft_crimp},${preCostingData.greige_width}\n\n`;
+
+    // Warp Details
+    csvContent += 'Warp Details\n';
+    csvContent += 'Count,Repeat Breakdown,Color Name,Denting,Rate Per Lbs,Dyeing Cost Per Kg,Repeat Ends Per Color,Pattern Total Ends,Dent Numbers In Full Width,Greige Yarn Rate,Consumption,Yarn Cost,Color Cost,Warp Total Cost,Required Greige\n';
+    warpDetails.forEach(detail => {
+        csvContent += `${detail.warp_count},${detail.repeat_breakdown},${detail.color_name},${detail.denting},${detail.rate_per_lbs},${detail.dyeing_cost_per_kg},${detail.repeat_ends_per_color || 0},${detail.pattern_total_ends || 0},${detail.dent_numbers_in_full_width || 0},${detail.greige_yarn_rate || 0},${detail.consumption || 0},${detail.yarn_cost || 0},${detail.color_cost || 0},${detail.warp_total_cost || 0},${detail.required_greige || 0}\n`;
+    });
+    // Add Warp Totals
+    csvContent += `Total,,,,,,${warpTotals.pattern_total_ends.toFixed(2)},${warpTotals.pattern_total_ends.toFixed(2)},${warpTotals.dent_numbers_in_full_width.toFixed(2)},${warpTotals.greige_yarn_rate.toFixed(1)},${warpTotals.consumption.toFixed(4)},${warpTotals.yarn_cost.toFixed(2)},${warpTotals.color_cost.toFixed(2)},${warpTotals.warp_total_cost.toFixed(2)},${warpTotals.required_greige.toFixed(2)}\n\n`;
+
+    // Weft Details
+    csvContent += 'Weft Details\n';
+    csvContent += 'Count,Repeat Breakdown,Color Name,Pick Density,Rate Per Lbs,Dyeing Cost Per Kg,Repeat Picks Per Color,Pattern Total Picks,Greige Yarn Rate,Consumption,Yarn Cost,Color Cost,Weft Total Cost,Required Greige\n';
+    weftDetails.forEach(detail => {
+        csvContent += `${detail.weft_count},${detail.repeat_breakdown},${detail.color_name},${detail.pick_density},${detail.rate_per_lbs},${detail.dyeing_cost_per_kg},${detail.repeat_picks_per_color || 0},${detail.pattern_total_picks || 0},${detail.greige_yarn_rate || 0},${detail.consumption || 0},${detail.yarn_cost || 0},${detail.color_cost || 0},${detail.weft_total_cost || 0},${detail.required_greige || 0}\n`;
+    });
+    // Add Weft Totals
+    csvContent += `Total,,,,,,${weftTotals.pattern_total_picks.toFixed(2)},${weftTotals.pattern_total_picks.toFixed(2)},${weftTotals.greige_yarn_rate.toFixed(1)},${weftTotals.consumption.toFixed(4)},${weftTotals.yarn_cost.toFixed(2)},${weftTotals.color_cost.toFixed(2)},${weftTotals.weft_total_cost.toFixed(2)},${weftTotals.required_greige.toFixed(2)}\n`;
+
+    // Create and download the CSV file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `PreCosting_${preCostingData.pre_costing_no.replace('Pre/costing/No:', '')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+	
 }
 
-// Helper function to add empty weft row
-function addEmptyWeftRow(tbody) {
-    const newRow = document.createElement('tr');
-    newRow.className = 'pattern-row';
-    newRow.innerHTML = `
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="text" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td><input type="number" class="form-control" value=""></td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.0</td>
-        <td class="result-cell">0.0000</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td class="result-cell">0.00</td>
-        <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
-    `;
-    tbody.insertBefore(newRow, tbody.querySelector('.total-row'));
-    calculateForm();
+// Export to SQL
+function exportToSQL() {
+    if (!isLoggedIn) {
+        alert('Please log in to perform this action.');
+        return;
+    }
+	calculateForm(); // Ensure calculations are up-to-date
+    if (!currentPreCostingData) {
+        alert('No pre-costing data loaded. Please search for a pre-costing number first.');
+        return;
+    }
+    if (!currentPreCostingData) {
+        alert('No pre-costing data loaded. Please search for a pre-costing number first.');
+        return;
+    }
+
+    const { preCostingData, warpDetails, weftDetails } = currentPreCostingData;
+
+    // Calculate Warp Details totals
+    const warpTotals = {
+        pattern_total_ends: 0,
+        dent_numbers_in_full_width: 0,
+        greige_yarn_rate: 0,
+        consumption: 0,
+        yarn_cost: 0,
+        color_cost: 0,
+        warp_total_cost: 0,
+        required_greige: 0
+    };
+    warpDetails.forEach(detail => {
+        warpTotals.pattern_total_ends += detail.pattern_total_ends || 0;
+        warpTotals.dent_numbers_in_full_width += detail.dent_numbers_in_full_width || 0;
+        warpTotals.greige_yarn_rate += detail.greige_yarn_rate || 0;
+        warpTotals.consumption += detail.consumption || 0;
+        warpTotals.yarn_cost += detail.yarn_cost || 0;
+        warpTotals.color_cost += detail.color_cost || 0;
+        warpTotals.warp_total_cost += detail.warp_total_cost || 0;
+        warpTotals.required_greige += detail.required_greige || 0;
+    });
+
+    // Calculate Weft Details totals
+    const weftTotals = {
+        pattern_total_picks: 0,
+        greige_yarn_rate: 0,
+        consumption: 0,
+        yarn_cost: 0,
+        color_cost: 0,
+        weft_total_cost: 0,
+        required_greige: 0
+    };
+    weftDetails.forEach(detail => {
+        weftTotals.pattern_total_picks += detail.pattern_total_picks || 0;
+        weftTotals.greige_yarn_rate += detail.greige_yarn_rate || 0;
+        weftTotals.consumption += detail.consumption || 0;
+        weftTotals.yarn_cost += detail.yarn_cost || 0;
+        weftTotals.color_cost += detail.color_cost || 0;
+        weftTotals.weft_total_cost += detail.weft_total_cost || 0;
+        weftTotals.required_greige += detail.required_greige || 0;
+    });
+
+    // SQL content
+    let sqlContent = '';
+
+    // Warp Details
+    warpDetails.forEach(detail => {
+        sqlContent += `INSERT INTO warp_details (
+            pre_costing_no, warp_count, repeat_breakdown, color_name, denting,
+            rate_per_lbs, dyeing_cost_per_kg, repeat_ends_per_color, pattern_total_ends,
+            dent_numbers_in_full_width, greige_yarn_rate, consumption, yarn_cost,
+            color_cost, warp_total_cost, required_greige
+        ) VALUES (
+            '${detail.pre_costing_no}', ${detail.warp_count}, ${detail.repeat_breakdown}, '${detail.color_name}', ${detail.denting},
+            ${detail.rate_per_lbs}, ${detail.dyeing_cost_per_kg}, ${detail.repeat_ends_per_color || 0}, ${detail.pattern_total_ends || 0},
+            ${detail.dent_numbers_in_full_width || 0}, ${detail.greige_yarn_rate || 0}, ${detail.consumption || 0}, ${detail.yarn_cost || 0},
+            ${detail.color_cost || 0}, ${detail.warp_total_cost || 0}, ${detail.required_greige || 0}
+        );\n`;
+    });
+
+    // Weft Details
+    weftDetails.forEach(detail => {
+        sqlContent += `INSERT INTO weft_details (
+            pre_costing_no, weft_count, repeat_breakdown, color_name, pick_density,
+            rate_per_lbs, dyeing_cost_per_kg, repeat_picks_per_color, pattern_total_picks,
+            greige_yarn_rate, consumption, yarn_cost, color_cost, weft_total_cost,
+            required_greige
+        ) VALUES (
+            '${detail.pre_costing_no}', ${detail.weft_count}, ${detail.repeat_breakdown}, '${detail.color_name}', ${detail.pick_density},
+            ${detail.rate_per_lbs}, ${detail.dyeing_cost_per_kg}, ${detail.repeat_picks_per_color || 0}, ${detail.pattern_total_picks || 0},
+            ${detail.greige_yarn_rate || 0}, ${detail.consumption || 0}, ${detail.yarn_cost || 0}, ${detail.color_cost || 0},
+            ${detail.weft_total_cost || 0}, ${detail.required_greige || 0}
+        );\n`;
+    });
+
+    // Add comments for totals (not inserted into the database, but included for reference)
+    sqlContent += `\n-- Warp Totals\n`;
+    sqlContent += `-- Pattern Total Ends: ${warpTotals.pattern_total_ends.toFixed(2)}\n`;
+    sqlContent += `-- Dent Numbers In Full Width: ${warpTotals.dent_numbers_in_full_width.toFixed(2)}\n`;
+    sqlContent += `-- Greige Yarn Rate: ${warpTotals.greige_yarn_rate.toFixed(1)}\n`;
+    sqlContent += `-- Consumption: ${warpTotals.consumption.toFixed(4)}\n`;
+    sqlContent += `-- Yarn Cost: ${warpTotals.yarn_cost.toFixed(2)}\n`;
+    sqlContent += `-- Color Cost: ${warpTotals.color_cost.toFixed(2)}\n`;
+    sqlContent += `-- Warp Total Cost: ${warpTotals.warp_total_cost.toFixed(2)}\n`;
+    sqlContent += `-- Required Greige: ${warpTotals.required_greige.toFixed(2)}\n`;
+
+    sqlContent += `\n-- Weft Totals\n`;
+    sqlContent += `-- Pattern Total Picks: ${weftTotals.pattern_total_picks.toFixed(2)}\n`;
+    sqlContent += `-- Greige Yarn Rate: ${weftTotals.greige_yarn_rate.toFixed(1)}\n`;
+    sqlContent += `-- Consumption: ${weftTotals.consumption.toFixed(4)}\n`;
+    sqlContent += `-- Yarn Cost: ${weftTotals.yarn_cost.toFixed(2)}\n`;
+    sqlContent += `-- Color Cost: ${weftTotals.color_cost.toFixed(2)}\n`;
+    sqlContent += `-- Weft Total Cost: ${weftTotals.weft_total_cost.toFixed(2)}\n`;
+    sqlContent += `-- Required Greige: ${weftTotals.required_greige.toFixed(2)}\n`;
+
+    // Create and download the SQL file
+    const blob = new Blob([sqlContent], { type: 'text/sql;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `PreCosting_${preCostingData.pre_costing_no.replace('Pre/costing/No:', '')}.sql`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
-// Save data locally by downloading as JSON file
+
+// Save locally (to localStorage)
 function saveLocally() {
     if (!isLoggedIn) {
         alert('Please log in to perform this action.');
         return;
     }
-    try {
-        const formData = getFormData();
-        const dataToSave = {};
-        dataToSave[formData.preCostingNo] = formData;
-        const jsonContent = JSON.stringify(dataToSave, null, 2);
-        const blob = new Blob([jsonContent], { type: 'application/json' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', `preCostingData_${formData.preCostingNo}.json`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        //alert('Data saved as a JSON file. Please save it in your Documents folder.');
-    } catch (error) {
-        console.error('Error saving locally:', error);
-        alert('Failed to save data locally.');
+
+    const formData = getFormData();
+    let savedData = JSON.parse(localStorage.getItem('preCostingSavedData')) || [];
+
+    const existingIndex = savedData.findIndex(data => data.preCostingNo === formData.preCostingNo);
+    if (existingIndex !== -1) {
+        savedData[existingIndex] = formData;
+    } else {
+        savedData.push(formData);
     }
+
+    localStorage.setItem('preCostingSavedData', JSON.stringify(savedData));
+
+    // Extract the numeric part for the file name
+    const preCostingNumber = formData.preCostingNo.replace('Pre/costing/No:', '');
+
+    const jsonString = JSON.stringify(formData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `PreCosting_${preCostingNumber}.json`); // Use the numeric part
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    console.log('Saved Data:', savedData);
 }
 
-// Show load modal with file upload option
+// Show load modal with saved data
 function showLoadModal() {
     if (!isLoggedIn) {
         alert('Please log in to perform this action.');
         return;
     }
-    try {
-        // Create modal with file upload input
-        const modal = document.createElement('div');
-        modal.className = 'modal fade';
-        modal.id = 'loadModal';
-        modal.innerHTML = `
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Load Pre-costing Data</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label for="loadFileInput" class="form-label">Select a JSON file to load pre-costing data:</label>
-                            <input type="file" class="form-control" id="loadFileInput" accept=".json">
-                        </div>
-                        <table class="table" id="loadFileTable" style="display: none;">
-                            <thead>
-                                <tr>
-                                    <th>Pre-costing No</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="loadModalTableBody"></tbody>
-                        </table>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
+
+    const loadList = document.getElementById('loadList');
+    if (!loadList) {
+        console.error('loadList element not found. Please ensure the modal HTML is correct.');
+        return;
+    }
+
+    let savedData = JSON.parse(localStorage.getItem('preCostingSavedData')) || [];
+    loadList.innerHTML = '';
+
+    if (savedData.length === 0) {
+        loadList.innerHTML = '<li class="list-group-item">No saved data found in session.</li>';
+    } else {
+        savedData.forEach((data, index) => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+                Pre Costing No: ${data.preCostingNo} (Saved on ${new Date().toLocaleString()})
+                <div>
+                    <button class="btn btn-sm btn-primary load-data-btn me-2" data-index="${index}">Load</button>
+                    <button class="btn btn-sm btn-danger delete-data-btn" data-index="${index}">Delete</button>
                 </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
+            `;
+            loadList.appendChild(li);
+        });
+    }
 
-        const bootstrapModal = new bootstrap.Modal(modal);
-        bootstrapModal.show();
+    const loadModalElement = document.getElementById('loadModal');
+    if (!loadModalElement) {
+        console.error('loadModal element not found. Please ensure the modal HTML is correct.');
+        return;
+    }
 
-        // Add event listener for file input
-        const fileInput = document.getElementById('loadFileInput');
+    const loadModal = new bootstrap.Modal(loadModalElement);
+    loadModal.show();
+
+    // Add event listeners for Load buttons
+    document.querySelectorAll('.load-data-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const index = btn.getAttribute('data-index');
+            loadData(index);
+            loadModal.hide();
+        });
+    });
+
+    // Add event listeners for Delete buttons
+    document.querySelectorAll('.delete-data-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const index = btn.getAttribute('data-index');
+            deleteData(index);
+            loadModal.hide();
+            showLoadModal();
+        });
+    });
+
+    // Add event listener for file input
+    const fileInput = document.getElementById('loadJsonFile');
+    if (fileInput) {
         fileInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
@@ -1694,90 +2113,190 @@ function showLoadModal() {
             const reader = new FileReader();
             reader.onload = (e) => {
                 try {
-                    const savedData = JSON.parse(e.target.result);
-                    const preCostingNumbers = Object.keys(savedData);
+                    const jsonData = JSON.parse(e.target.result);
+                    // Add the loaded data to localStorage to make it available for loading
+                    let savedData = JSON.parse(localStorage.getItem('preCostingSavedData')) || [];
+                    savedData.push(jsonData);
+                    localStorage.setItem('preCostingSavedData', JSON.stringify(savedData));
 
-                    if (preCostingNumbers.length === 0) {
-                        alert('No pre-costing data found in the selected file.');
-                        return;
-                    }
+                    // Refresh the modal to show the newly added data
+                    loadModal.hide();
+                    showLoadModal();
 
-                    // Show table with pre-costing numbers
-                    const table = document.getElementById('loadFileTable');
-                    const tbody = document.getElementById('loadModalTableBody');
-                    tbody.innerHTML = preCostingNumbers.map(no => `
-                        <tr>
-                            <td>${no}</td>
-                            <td><button class="btn btn-primary btn-sm load-data-btn" data-pre-costing-no="${no}">Load</button></td>
-                        </tr>
-                    `).join('');
-                    table.style.display = 'block';
-
-                    // Add event listeners to load buttons
-                    document.querySelectorAll('.load-data-btn').forEach(btn => {
-                        btn.addEventListener('click', () => {
-                            const preCostingNo = btn.getAttribute('data-pre-costing-no');
-                            loadData(preCostingNo, savedData);
-                            bootstrapModal.hide();
-                        });
-                    });
+                    // Optionally, load the data immediately
+                    loadData(savedData.length - 1);
                 } catch (error) {
                     console.error('Error parsing JSON file:', error);
-                    alert('Failed to parse the selected JSON file.');
+                    alert('Failed to load JSON file. Please ensure it is a valid JSON file.');
                 }
             };
             reader.readAsText(file);
         });
-
-        modal.addEventListener('hidden.bs.modal', () => {
-            modal.remove();
-        });
-    } catch (error) {
-        console.error('Error showing load modal:', error);
-        alert('Failed to load saved data.');
     }
 }
 
-// Load data from provided savedData
-function loadData(preCostingNo, savedData) {
-    try {
-        const data = savedData[preCostingNo];
-        if (!data) {
-            alert('No data found for the selected Pre-costing No.');
-            return;
-        }
+function deleteData(index) {
+    let savedData = JSON.parse(localStorage.getItem('preCostingSavedData')) || [];
+    if (index >= 0 && index < savedData.length) {
+        savedData.splice(index, 1); // Remove the entry at the specified index
+        localStorage.setItem('preCostingSavedData', JSON.stringify(savedData));
+        // alert('Data deleted successfully!');
+    } else {
+        alert('Error: Data not found.');
+    }
+}
 
-        // Load input fields
-        document.getElementById('preCostingNo').value = data.preCostingNo || '';
-        document.getElementById('buyer').value = data.buyer || '';
-        document.getElementById('construction').value = data.construction || '';
-        document.getElementById('finishWidth').value = data.finishWidth || '';
-        document.getElementById('totalEnds').value = data.totalEnds || '';
-        document.getElementById('warpCrimp').value = data.warpCrimp || '';
-        document.getElementById('ydAllow').value = data.ydAllow || '';
-        document.getElementById('warpWast').value = data.warpWast || '';
-        document.getElementById('weftWast').value = data.weftWast || '';
-        document.getElementById('finishAllow').value = data.finishAllow || '';
-        document.getElementById('weavingPickRate').value = data.weavingPickRate || '';
-        document.getElementById('dyeingFinishingRate').value = data.dyeingFinishingRate || '';
-        document.getElementById('commercialCostInput').value = data.commercialCostInput || '';
-        document.getElementById('profit').value = data.profit || '';
-        document.getElementById('orderQuantity').value = data.orderQuantity || '';
-        document.getElementById('pickLength').value = data.pickLength || '';
-        document.getElementById('preCostingDate').value = data.preCostingDate || '';
-        document.getElementById('dollarRateTk').value = data.dollarRateTk || '';
-        document.getElementById('epi').value = data.epi || '';
-        document.getElementById('ppi').value = data.ppi || '';
-        document.getElementById('weaveType').value = data.weaveType || '';
-        document.getElementById('weftCrimp').value = data.weftCrimp || '';
+function loadData(index) {
+    const savedData = JSON.parse(localStorage.getItem('preCostingSavedData')) || [];
+    const data = savedData[index];
+    if (!data) {
+        alert('No data found to load.');
+        return;
+    }
 
-        // Clear and repopulate Warp and Weft tables
-        const warpTbody = document.getElementById('warpCalculationTable').querySelector('tbody');
-        const weftTbody = document.getElementById('weftCalculationTable').querySelector('tbody');
-        warpTbody.innerHTML = '';
-        weftTbody.innerHTML = '';
+    // Construct currentPreCostingData in the same format as Supabase data
+    const preCostingData = {
+        pre_costing_no: data.preCostingNo,
+        buyer: data.buyer || '',
+        construction: data.construction || '',
+        finish_width: data.finishWidth || 0,
+        total_ends: data.totalEnds || 0,
+        warp_crimp: data.warpCrimp || 0,
+        yd_allow: data.ydAllow || 0,
+        warp_wast: data.warpWast || 0,
+        weft_wast: data.weftWast || 0,
+        finish_allow: data.finishAllow || 0,
+        weaving_rate: data.weavingPickRate || 0,
+        dye_finish_rate: data.dyeingFinishingRate || 0,
+        commercial_cost: data.commercialCostInput || 0,
+        profit: data.profit || 0,
+        order_quantity: data.orderQuantity || 0,
+        pick_length: data.pickLength || 0,
+        pre_costing_date: data.preCostingDate || '',
+        dollar_rate_tk: data.dollarRateTk || 0,
+        epi: data.epi || 0,
+        ppi: data.ppi || 0,
+        weave_type: data.weaveType || '',
+        weft_crimp: data.weftCrimp || 0,
+        greige_width: data.greigeWidth || 0,
+        // Add fields that are typically populated after calculation
+        greige_req_quantity: 0, // These will be recalculated
+        required_warp_yarn: 0,
+        required_weft_yarn: 0,
+        total_required_yarn: 0,
+        warp_greige_consump: 0,
+        weft_greige_consump: 0,
+        total_greige_consump: 0,
+        warp_finish_consump: 0,
+        weft_finish_consump: 0,
+        total_finish_consump: 0,
+        total_greige_yarn_cost_per_yd: 0,
+        warp_yarn_cost: 0,
+        weft_yarn_cost: 0,
+        greige_cost: 0,
+        yarn_dyeing_cost: 0,
+        total_yarn_cost: 0,
+        weaving_cost: 0,
+        break_even_cost: 0,
+        sales_price: 0,
+        upcharged_sales_price: 0,
+        total_warp_cost: 0,
+        total_weft_cost: 0,
+        total_greige_cost: 0,
+        total_dyeing_cost: 0,
+        total_weaving_cost: 0,
+        total_dye_finish_cost: 0,
+        total_commercial_cost: 0,
+        grand_total_break_even_cost: 0,
+        net_break_even_cost_per_yd: 0,
+        net_profit_per_yd: 0,
+        grand_total_profit: 0,
+        total_sales_value: 0,
+        upcharged_net_profit_per_yd: 0,
+        upcharged_grand_total_profit: 0,
+        upcharged_total_sales_value: 0,
+        total_pre_cost_tk: 0,
+        total_pre_cost_usd: 0,
+        total_upcharged_pre_cost_tk: 0,
+        total_upcharged_pre_cost_usd: 0
+    };
 
-        // Add rows based on saved data
+    const warpDetails = (data.warpDetails || []).map(detail => ({
+        pre_costing_no: data.preCostingNo,
+        warp_count: detail.count || 0,
+        repeat_breakdown: detail.repeatBreakdown || 0,
+        color_name: detail.colorName || '',
+        denting: detail.denting || 0,
+        rate_per_lbs: detail.ratePerLbs || 0,
+        dyeing_cost_per_kg: detail.dyeingCostPerKg || 0,
+        repeat_ends_per_color: 0, // Will be recalculated
+        pattern_total_ends: 0,
+        dent_numbers_in_full_width: 0,
+        greige_yarn_rate: 0,
+        consumption: 0,
+        yarn_cost: 0,
+        color_cost: 0,
+        warp_total_cost: 0,
+        required_greige: 0
+    }));
+
+    const weftDetails = (data.weftDetails || []).map(detail => ({
+        pre_costing_no: data.preCostingNo,
+        weft_count: detail.count || 0,
+        repeat_breakdown: detail.repeatBreakdown || 0,
+        color_name: detail.colorName || '',
+        pick_density: detail.pickDensity || 0,
+        rate_per_lbs: detail.ratePerLbs || 0,
+        dyeing_cost_per_kg: detail.dyeingCostPerKg || 0,
+        repeat_picks_per_color: 0, // Will be recalculated
+        pattern_total_picks: 0,
+        greige_yarn_rate: 0,
+        consumption: 0,
+        yarn_cost: 0,
+        color_cost: 0,
+        weft_total_cost: 0,
+        required_greige: 0
+    }));
+
+    // Populate currentPreCostingData
+    currentPreCostingData = {
+        preCostingData: preCostingData,
+        warpDetails: warpDetails,
+        weftDetails: weftDetails
+    };
+
+    // Autofill input fields with the full preCostingNo format
+    document.getElementById('preCostingNo').value = data.preCostingNo; // Use the full format
+    document.getElementById('buyer').value = data.buyer || '';
+    document.getElementById('construction').value = data.construction || '';
+    document.getElementById('finishWidth').value = data.finishWidth || '';
+    document.getElementById('totalEnds').value = data.totalEnds || '';
+    document.getElementById('warpCrimp').value = data.warpCrimp || '';
+    document.getElementById('ydAllow').value = data.ydAllow || '';
+    document.getElementById('warpWast').value = data.warpWast || '';
+    document.getElementById('weftWast').value = data.weftWast || '';
+    document.getElementById('finishAllow').value = data.finishAllow || '';
+    document.getElementById('weavingPickRate').value = data.weavingPickRate || '';
+    document.getElementById('dyeingFinishingRate').value = data.dyeingFinishingRate || '';
+    document.getElementById('commercialCostInput').value = data.commercialCostInput || '';
+    document.getElementById('profit').value = data.profit || '';
+    document.getElementById('orderQuantity').value = data.orderQuantity || '';
+    document.getElementById('pickLength').value = data.pickLength || '';
+    document.getElementById('preCostingDate').value = data.preCostingDate || '';
+    document.getElementById('dollarRateTk').value = data.dollarRateTk || '';
+    document.getElementById('epi').value = data.epi || '';
+    document.getElementById('ppi').value = data.ppi || '';
+    document.getElementById('weaveType').value = data.weaveType || '';
+    document.getElementById('weftCrimp').value = data.weftCrimp || '';
+    document.getElementById('greigeWidth').value = data.greigeWidth || '';
+
+    // Repopulate Warp and Weft tables
+    const warpTbody = document.getElementById('warpCalculationTable').querySelector('tbody');
+    const weftTbody = document.getElementById('weftCalculationTable').querySelector('tbody');
+    warpTbody.innerHTML = '';
+    weftTbody.innerHTML = '';
+
+    if (data.warpDetails && data.warpDetails.length > 0) {
         data.warpDetails.forEach(warpDetail => {
             const newRow = document.createElement('tr');
             newRow.className = 'pattern-row';
@@ -1799,12 +2318,16 @@ function loadData(preCostingNo, savedData) {
                 <td class="result-cell">0.00</td>
                 <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
             `;
-            warpTbody.insertBefore(newRow, warpTbody.querySelector('.total-row') || null);
+            warpTbody.appendChild(newRow);
         });
+    } else {
+        addEmptyWarpRow(warpTbody);
+    }
 
+    if (data.weftDetails && data.weftDetails.length > 0) {
         data.weftDetails.forEach(weftDetail => {
             const newRow = document.createElement('tr');
-            newRow.className = "pattern-row";
+            newRow.className = 'pattern-row';
             newRow.innerHTML = `
                 <td><input type="number" class="form-control" value="${weftDetail.count || ''}"></td>
                 <td><input type="number" class="form-control" value="${weftDetail.repeatBreakdown || ''}"></td>
@@ -1822,27 +2345,77 @@ function loadData(preCostingNo, savedData) {
                 <td class="result-cell">0.00</td>
                 <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
             `;
-            weftTbody.insertBefore(newRow, weftTbody.querySelector('.total-row') || null);
+            weftTbody.appendChild(newRow);
         });
-
-        // Add one empty row to each table if no rows exist
-        if (warpTbody.rows.length === 0) addEmptyWarpRow(warpTbody);
-        if (weftTbody.rows.length === 0) addEmptyWeftRow(weftTbody);
-
-        // Recalculate to update results
-        calculateForm();
-        //alert('Pre-costing data loaded successfully from the JSON file!');
-    } catch (error) {
-        console.error('Error loading data:', error);
-        alert('Failed to load data from the JSON file.');
+    } else {
+        addEmptyWeftRow(weftTbody);
     }
-}
 
-// Initial setup if already logged in
-if (isLoggedIn) {
-    setupEventListeners();
     calculateForm();
 }
+
+// Add empty warp row
+function addEmptyWarpRow(tbody) {
+    const newRow = document.createElement('tr');
+    newRow.className = 'pattern-row';
+    newRow.innerHTML = `
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="text" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.0</td>
+        <td class="result-cell">0.0000</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
+    `;
+    tbody.appendChild(newRow);
+    calculateForm(); // Recalculate to ensure total row is updated and positioned correctly
+}
+
+// Add empty weft row
+function addEmptyWeftRow(tbody) {
+    const newRow = document.createElement('tr');
+    newRow.className = 'pattern-row';
+    newRow.innerHTML = `
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="text" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td><input type="number" class="form-control" value=""></td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.0</td>
+        <td class="result-cell">0.0000</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td class="result-cell">0.00</td>
+        <td><button class="btn btn-sm btn-danger remove-row"><i class="fas fa-trash"></i></button></td>
+    `;
+    tbody.appendChild(newRow);
+    calculateForm(); // Recalculate to ensure total row is updated and positioned correctly
+}
+
+// Initialize tables with one empty row each
+document.addEventListener('DOMContentLoaded', () => {
+    const warpTbody = document.getElementById('warpCalculationTable')?.querySelector('tbody');
+    const weftTbody = document.getElementById('weftCalculationTable')?.querySelector('tbody');
+    if (warpTbody && warpTbody.children.length === 0) {
+        addEmptyWarpRow(warpTbody);
+    }
+    if (weftTbody && weftTbody.children.length === 0) {
+        addEmptyWeftRow(weftTbody);
+    }
+});
 </script>
 </body>
 </html>
